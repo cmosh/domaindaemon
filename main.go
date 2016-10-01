@@ -1,66 +1,58 @@
-// Copyright 2013 Beego Samples authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License"): you may
-// not use this file except in compliance with the License. You may obtain
-// a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-// License for the specific language governing permissions and limitations
-// under the License.
-
-// This sample is about using long polling and WebSocket to build a web-based chat room based on beego.
 package main
 
 import (
-	"os"
+	"github.com/gin-gonic/gin"
+   )
 
-	"github.com/astaxie/beego"
-	"github.com/beego/i18n"
 
-	"github.com/openshift/golang-ex/controllers"
-)
 
-const (
-	APP_VER = "0.1.1.0227"
-)
-
-var (
-	servingCertFile = os.Getenv("SERVING_CERT")
-	servingKeyFile  = os.Getenv("SERVING_KEY")
-)
+var DB = make(map[string]string)
 
 func main() {
-	beego.Info(beego.AppName, APP_VER)
+	r := gin.Default()
 
-	// Register routers.
-	beego.Router("/", &controllers.AppController{})
-	// Indicate AppController.Join method to handle POST requests.
-	beego.Router("/join", &controllers.AppController{}, "post:Join")
+	// Ping test
+	r.GET("/ping", func(c *gin.Context) {
+		c.String(200, "pong")
+	})
 
-	// Long polling.
-	beego.Router("/lp", &controllers.LongPollingController{}, "get:Join")
-	beego.Router("/lp/post", &controllers.LongPollingController{})
-	beego.Router("/lp/fetch", &controllers.LongPollingController{}, "get:Fetch")
+	// Get user value
+	r.GET("/user/:name", func(c *gin.Context) {
+		user := c.Params.ByName("name")
+		value, ok := DB[user]
+		if ok {
+			c.JSON(200, gin.H{"user": user, "value": value})
+		} else {
+			c.JSON(200, gin.H{"user": user, "status": "no value"})
+		}
+	})
 
-	// WebSocket.
-	beego.Router("/ws", &controllers.WebSocketController{})
-	beego.Router("/ws/join", &controllers.WebSocketController{}, "get:Join")
+	// Authorized group (uses gin.BasicAuth() middleware)
+	// Same than:
+	// authorized := r.Group("/")
+	// authorized.Use(gin.BasicAuth(gin.Credentials{
+	//	  "foo":  "bar",
+	//	  "manu": "123",
+	//}))
+	authorized := r.Group("/", gin.BasicAuth(gin.Accounts{
+		"foo":  "bar", // user:foo password:bar
+		"manu": "123", // user:manu password:123
+	}))
 
-	// Register template functions.
-	beego.AddFuncMap("i18n", i18n.Tr)
+	authorized.POST("admin", func(c *gin.Context) {
+		user := c.MustGet(gin.AuthUserKey).(string)
 
-	// serve securely if the certificates are present
-	_, certErr := os.Stat(servingCertFile)
-	_, keyErr := os.Stat(servingKeyFile)
-	if certErr == nil && keyErr == nil && len(servingCertFile) > 0 && len(servingKeyFile) > 0 {
-		beego.HttpCertFile = servingCertFile
-		beego.HttpKeyFile = servingKeyFile
-		beego.EnableHttpTLS = true
-	}
+		// Parse JSON
+		var json struct {
+			Value string `json:"value" binding:"required"`
+		}
 
-	beego.Run()
+		if c.Bind(&json) == nil {
+			DB[user] = json.Value
+			c.JSON(200, gin.H{"status": "ok"})
+		}
+	})
+
+	// Listen and Server in 0.0.0.0:8080
+	r.Run(":8080")
 }
